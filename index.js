@@ -8,4 +8,4 @@
 
 'use strict';
 
-module.exports = require('./esp-adapter');
+module.exports = require('./generic-ssdp-http-json-adapter');

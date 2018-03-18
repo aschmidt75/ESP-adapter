@@ -1,5 +1,5 @@
 /**
- * esp-adapter.js - Web server adapter implemented as a plugin.
+ * generic-ssdp-http-json-adapter.js - HTTP+JSON web server adapter implemented as a plugin, with support for SSDP.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -26,7 +26,7 @@ try {
   Property = gwa.Property;
 }
 
-class ESPProperty extends Property {
+class GenericProperty extends Property {
   constructor(device, name, propertyDescription) {
     super(device, name, propertyDescription);
     this.unit = propertyDescription.unit;
@@ -37,7 +37,7 @@ class ESPProperty extends Property {
     this.setCachedValue(propertyDescription.value);
     this.device.notifyPropertyChanged(this);
     let url = this.device.url + this.href;
-    console.log('New ESPProperty, url='+url);
+    console.log('New GenericProperty, url='+url);
     
     fetch(url)
     .then((resp) => resp.json())
@@ -85,7 +85,7 @@ console.log('Setting value for '+keys[i]+' to '+values[i]);
   }
 }
 
-class ESPDevice extends Device {
+class GenericHTTPJSONDevice extends Device {
   constructor(adapter, id, name, type, description, url, properties) {
     super(adapter, id);
 
@@ -99,14 +99,14 @@ class ESPDevice extends Device {
     let keys = Object.keys(properties);
     let values = Object.values(properties);
     for (var i=0; i<keys.length; i++) {
-      this.properties.set(keys[i], new ESPProperty(this, keys[i], values[i]));
+      this.properties.set(keys[i], new GenericProperty(this, keys[i], values[i]));
     }
   }
 }
 
-class ESPAdapter extends Adapter {
+class GenericSSDPAdapter extends Adapter {
   constructor(addonManager, packageName, manifest) {
-    super(addonManager, 'ESPAdapter', packageName);
+    super(addonManager, 'GenericSSDPAdapter', packageName);
     addonManager.addAdapter(this);
     this.manifest = manifest;
   }
@@ -131,7 +131,7 @@ class ESPAdapter extends Adapter {
           description = thingObj['description'];
         let type = thingObj['type'];
   
-        this.handleDeviceAdded(new ESPDevice(this, id, name, type, description, url, thingObj['properties']));
+        this.handleDeviceAdded(new GenericHTTPJSONDevice(this, id, name, type, description, url, thingObj['properties']));
     }
     } catch(err) {
       //console.log('tryDevice err:+'+err);
@@ -139,33 +139,47 @@ class ESPAdapter extends Adapter {
   }
 
   startPairing(timeoutSeconds) {
-    console.log(this.name, 'id', this.id, 'pairing started');
+    console.log(this.name, 'id', this.id, 'pairing started, listening for SSDP NOTIFIY messages');
+    console.log(this.name, 'id', this.id, 'timeoutSeconds='+timeoutSeconds);
+    var PORT = 1900;
+    var dgram = require('dgram');
+    var client = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
-    var ipStart = this.manifest.moziot.config.ipStart;
-    var ipStartSplit = ipStart.split(".");
-    var ipEnd = this.manifest.moziot.config.ipEnd;
-    var ipEndSplit = ipEnd.split(".");
+    var found = new Map();
 
-    var url="";
-    var thingUser = this.manifest.moziot.config.thingUser;
-    var thingPwd = this.manifest.moziot.config.thingPwd;
+    client.on('listening', function () {
+      var address = client.address();
+      client.setBroadcast(true)
+      client.setMulticastTTL(128);
+      client.addMembership('239.255.255.250');
+    });
 
-    console.log("Pairing "+ipStartSplit[3]+" to "+ipEndSplit[3]);
-    for(var i=Number(ipStartSplit[3]); i<=Number(ipEndSplit[3]); i++) {
-      if( thingUser ) {
-        url = "http://"+thingUser+":"+thingPwd+"@"+ipStartSplit[0]+"."+ipStartSplit[1]+"."+ipStartSplit[2]+"."+i+"/things/esp";
+    client.on('message', function (message, remote) {
+      //console.log('From: ' + remote.address + ':' + remote.port);
+      lines = message.toString().split("\n");
+      if (lines.length >= 2) {
+        if (lines[0].match("^NOTIFY .*")) {
+          for (var i = 1; i < lines.length; i++) {
+            a = lines[i].split(": ");
+            if (a.length == 2 && a[0] == "LOCATION") {
+              location = a[1];
+              if (found.has(location) == false) {
+                console.log(this.name, 'id', this.id, "SSDP NOTIFY, LOCATION="+location);
+                found.set(location, remote);
+                this.tryDevice(url, i);
+              }
+            }
+          }
+        }
       }
-      else {
-        url = "http://"+ipStartSplit[0]+"."+ipStartSplit[1]+"."+ipStartSplit[2]+"."+i+"/things/esp";
-      }
+    });
 
-      this.tryDevice(url, i);
-    }
+    client.bind(PORT);
   }
 }
 
-function loadESPAdapter(addonManager, manifest, _errorCallback) {
-  let adapter = new ESPAdapter(addonManager, manifest.name, manifest);
+function loadGenericSSDPAdapter(addonManager, manifest, _errorCallback) {
+  let adapter = new GenericSSDPAdapter(addonManager, manifest.name, manifest);
 }
 
-module.exports = loadESPAdapter;
+module.exports = loadGenericSSDPAdapter;

@@ -36,8 +36,6 @@
     "plugin": true,
     "exec": "{nodeLoader} {path}",
     "config": {
-      "ipStart": "10.0.2.10",
-      "ipEnd": "10.0.2.20"
     }
   }
 }
