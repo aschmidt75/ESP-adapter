@@ -38,12 +38,12 @@ class GenericProperty extends Property {
     this.device.notifyPropertyChanged(this);
     let url = this.device.url + this.href;
     console.log('New GenericProperty, url='+url);
-    
+
     fetch(url)
     .then((resp) => resp.json())
     .then((resp) => {
         let keys = Object.keys(resp);
-        let values = Object.values(resp); 
+        let values = Object.values(resp);
         for (var i=0; i<keys.length; i++) {
           let obj = this.device.findProperty(keys[i]);
           obj.setCachedValue(values[i]);
@@ -72,9 +72,8 @@ class GenericProperty extends Property {
     .then((resp) => resp.json())
     .then((resp) => {
         let keys = Object.keys(resp);
-        let values = Object.values(resp); 
+        let values = Object.values(resp);
         for (var i=0; i<keys.length; i++) {
-console.log('Setting value for '+keys[i]+' to '+values[i]);
           let obj = this.device.findProperty(keys[i]);
           obj.setCachedValue(values[i]);
           this.device.notifyPropertyChanged(obj);
@@ -94,7 +93,6 @@ class GenericHTTPJSONDevice extends Device {
     this.type = type;
     this.description = description;
 
-    console.log("Adding device at "+url);
     // properties are set by a json response from the actual device
     let keys = Object.keys(properties);
     let values = Object.values(properties);
@@ -109,36 +107,35 @@ class GenericSSDPAdapter extends Adapter {
     super(addonManager, 'GenericSSDPAdapter', packageName);
     addonManager.addAdapter(this);
     this.manifest = manifest;
+	     this.deviceCounter = 0;
   }
 
-  async tryDevice(url, i) {
+  async tryDevice(url) {
     console.log("Trying "+url);
     try {
-      let response = await fetch(url);
-      if (!response.ok) // or check for response.status
+      	let response = await fetch(url);
+     	if (!response.ok) // or check for response.status
           throw new Error(response.statusText);
-     let thingResponse = await response.json();
-     let keys = Object.keys(thingResponse);
-     let values = Object.values(thingResponse); 
 
-     for( var n=0; n<keys.length; n++ ) {
-        console.log('Adding thing->'+keys[n]);
-        let thingObj = values[n];
-        let name = thingObj['name'];
-        let id = this.name + "-" + i + ':' + n;
+  	let thingObj = await response.json();
+
+	let name = thingObj['name'];
+        let id = this.name+ ':' + (++this.deviceCounter);
         let description = '';
         if( thingObj['description'] )
           description = thingObj['description'];
         let type = thingObj['type'];
-  
+
         this.handleDeviceAdded(new GenericHTTPJSONDevice(this, id, name, type, description, url, thingObj['properties']));
-    }
+        console.log('Added thing->'+name);
     } catch(err) {
-      //console.log('tryDevice err:+'+err);
+      console.log('tryDevice err:+'+err);
     }
   }
 
   startPairing(timeoutSeconds) {
+    var s = this;
+    this.isPairing = true;
     console.log(this.name, 'id', this.id, 'pairing started, listening for SSDP NOTIFIY messages');
     console.log(this.name, 'id', this.id, 'timeoutSeconds='+timeoutSeconds);
     var PORT = 1900;
@@ -156,17 +153,17 @@ class GenericSSDPAdapter extends Adapter {
 
     client.on('message', function (message, remote) {
       //console.log('From: ' + remote.address + ':' + remote.port);
-      lines = message.toString().split("\n");
+      var lines = message.toString().split("\r\n");
       if (lines.length >= 2) {
         if (lines[0].match("^NOTIFY .*")) {
           for (var i = 1; i < lines.length; i++) {
-            a = lines[i].split(": ");
+            var a = lines[i].split(": ");
             if (a.length == 2 && a[0] == "LOCATION") {
-              location = a[1];
+              var location = a[1];
               if (found.has(location) == false) {
-                console.log(this.name, 'id', this.id, "SSDP NOTIFY, LOCATION="+location);
+                console.log(s.name, 'id', s.id, "SSDP NOTIFY, LOCATION="+location);
                 found.set(location, remote);
-                this.tryDevice(url, i);
+                s.tryDevice(location);
               }
             }
           }
@@ -175,7 +172,18 @@ class GenericSSDPAdapter extends Adapter {
     });
 
     client.bind(PORT);
+
+    var start = Date.now();
+    setTimeout(function(){ client.close(); console.log('closing UDP multicast socket'); }, (timeoutSeconds*1000)/2);
+
   }
+
+
+  cancelPairing() {
+    console.log('Cancelling pairing mode');
+    this.isPairing = false;
+  }
+
 }
 
 function loadGenericSSDPAdapter(addonManager, manifest, _errorCallback) {
